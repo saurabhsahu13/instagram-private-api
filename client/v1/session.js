@@ -201,3 +201,83 @@ Session.create = function(device, storage, username, password, proxy) {
             return Session.login(session, username, password)
         })
 }
+
+Session.createSessionForTwoFactorLogin = function(device, storage, username, password, proxy, verificationCode, twoFactorIdentifier) {
+    var that = this;
+    var session = new Session(device, storage);
+    if(_.isString(proxy) && !_.isEmpty(proxy))
+        session.proxyUrl = proxy;
+    return session.getAccountId()
+        .then(function () {
+            return session;
+        })
+        .catch(Exceptions.CookieNotValidError, function() {
+            // We either not have valid cookes or authentication is not fain!
+            return Session.twoFactorLogin(session, username, password, verificationCode, twoFactorIdentifier)
+        })
+}
+
+Session.twoFactorLogin = function(session, username, password, verificationCode, twoFactorIdentifier) {
+    
+    // We either not have valid cookes or authentication is not fain!
+    return new Request(session)
+    .setResource('two_factor_login')
+    .setMethod('POST')
+    .generateUUID()
+    .setData({
+        username: username,
+        password: password,
+        verification_code: verificationCode,
+        two_factor_identifier: twoFactorIdentifier,
+    })
+    .signPayload()
+    .send()
+    .catch(function (error) {
+        if (error.name == "RequestError" && _.isObject(error.json)) {
+            if(error.json.invalid_credentials)
+                throw new Exceptions.AuthenticationError(error.message);
+            if(error.json.error_type==="inactive user")
+                throw new Exceptions.AccountBanned(error.json.message+' '+error.json.help_url);
+        }
+        throw error;
+    })
+    .then(function () {
+        return [session, QE.sync(session)];
+    })
+    .spread(function (session) {
+        var autocomplete = Relationship.autocompleteUserList(session)
+            .catch(Exceptions.RequestsLimitError, function() {
+                // autocompleteUserList has ability to fail often
+                return false;
+            })
+        return [session, autocomplete];
+    })
+    .spread(function (session) {
+        return [session, new Timeline(session).get()];
+    })
+    .spread(function (session) {
+        return [session, Thread.recentRecipients(session)];
+    })
+    .spread(function (session) {
+        return [session, new Inbox(session).get()];
+    })
+    .spread(function (session) {
+        return [session, Megaphone.logSeenMainFeed(session)];
+    })
+    .spread(function(session) {
+        return session;
+    })
+    .catch(Exceptions.CheckpointError, function(error) {
+        // This situation is not really obvious,
+        // but even if you got checkpoint error (aka captcha or phone)
+        // verification, it is still an valid session unless `sessionid` missing
+        return session.getAccountId()
+            .then(function () {
+                // We got sessionId and accountId, we are good to go 
+                return session; 
+            })
+            .catch(Exceptions.CookieNotValidError, function (e) {
+                throw error;
+            })
+    })
+}
