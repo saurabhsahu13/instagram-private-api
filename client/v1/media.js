@@ -137,7 +137,7 @@ Media.delete = function(session, mediaId) {
         })
 };
 
-Media.edit = function(session, mediaId, caption, userTags) {
+Media.edit = function(session, mediaId, caption, userTags, location) {
     var requestPayload = {
         media_id: mediaId,
         caption_text: caption
@@ -145,6 +145,9 @@ Media.edit = function(session, mediaId, caption, userTags) {
 
     if (userTags) {
         requestPayload.usertags = JSON.stringify(userTags);
+    }
+    if (location) {
+        requestPayload.location = JSON.stringify(location);
     }
 
     return new Request(session)
